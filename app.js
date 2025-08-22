@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const mysql = require("mysql2/promise");
-const fs = require("fs");
 require("dotenv").config();
 
 const app = express();
@@ -31,7 +30,7 @@ async function initDb() {
     password: DB_PASSWORD,
     database: DB_NAME,
     connectionLimit: 10,
-    ssl: undefined // RDS MySQL typically doesn't require client certs by default
+    ssl: undefined // adjust if using RDS with SSL certs
   });
   // Create table if not exists
   await pool.query(`
@@ -44,6 +43,7 @@ async function initDb() {
   `);
 }
 
+// ================== FRONTEND PAGE ===================
 app.get("/", async (req, res) => {
   try {
     const [rows] = await pool.query("SELECT id, name, price, created_at FROM items ORDER BY id DESC LIMIT 10");
@@ -52,36 +52,93 @@ app.get("/", async (req, res) => {
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
-          <title>Node + RDS CRUD Demo</title>
+          <title>Node + RDS Cake CRUD</title>
           <style>
             body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 2rem; }
-            .card { border: 1px solid #ddd; border-radius: 12px; padding: 1rem 1.25rem; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+            .card { border: 1px solid #ddd; border-radius: 12px; padding: 1rem 1.25rem; box-shadow: 0 2px 6px rgba(0,0,0,0.06); margin-bottom: 2rem; }
             table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
             th, td { padding: .5rem .75rem; border-bottom: 1px solid #eee; text-align: left; }
-            .hint { color: #666; font-size: 0.9rem; }
-            code { background: #f6f8fa; padding: .2rem .4rem; border-radius: 6px; }
+            input, button { padding: .5rem .75rem; margin: .25rem; border-radius: 6px; border: 1px solid #ccc; }
+            button { background: #007bff; color: white; cursor: pointer; }
+            button:hover { background: #0056b3; }
           </style>
         </head>
         <body>
-          <h1>✅ Node.js + Amazon RDS (MySQL) CRUD</h1>
+          <h1>🎂 Cake Manager (Node.js + Amazon RDS)</h1>
+
           <div class="card">
-            <p>Connected to DB: <code>${DB_NAME}</code> at <code>${DB_HOST}:${DB_PORT}</code></p>
-            <p class="hint">Try the API:</p>
-            <ul>
-              <li>GET <code>/api/items</code></li>
-              <li>POST <code>/api/items</code> {"name": "Cake", "price": 5.99}</li>
-              <li>GET <code>/api/items/:id</code></li>
-              <li>PUT <code>/api/items/:id</code> {"name": "New", "price": 9.99}</li>
-              <li>DELETE <code>/api/items/:id</code></li>
-            </ul>
+            <h3>Add a Cake</h3>
+            <form id="addForm">
+              <input type="text" id="name" placeholder="Cake name" required />
+              <input type="number" id="price" placeholder="Price" step="0.01" required />
+              <button type="submit">Add</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h3>Update Cake</h3>
+            <form id="updateForm">
+              <input type="number" id="updateId" placeholder="Cake ID" required />
+              <input type="text" id="updateName" placeholder="New name" required />
+              <input type="number" id="updatePrice" placeholder="New price" step="0.01" required />
+              <button type="submit">Update</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h3>Delete Cake</h3>
+            <form id="deleteForm">
+              <input type="number" id="deleteId" placeholder="Cake ID" required />
+              <button type="submit">Delete</button>
+            </form>
+          </div>
+
+          <div class="card">
             <h3>Latest Items</h3>
             <table>
               <thead><tr><th>ID</th><th>Name</th><th>Price</th><th>Created</th></tr></thead>
-              <tbody>
+              <tbody id="itemsTable">
                 ${rows.map(r => `<tr><td>${r.id}</td><td>${r.name}</td><td>${r.price}</td><td>${new Date(r.created_at).toISOString()}</td></tr>`).join("")}
               </tbody>
             </table>
           </div>
+
+          <script>
+            async function refreshTable() {
+              const res = await fetch('/api/items');
+              const items = await res.json();
+              document.getElementById('itemsTable').innerHTML = items.map(r =>
+                \`<tr><td>\${r.id}</td><td>\${r.name}</td><td>\${r.price}</td><td>\${new Date(r.created_at).toISOString()}</td></tr>\`
+              ).join('');
+            }
+
+            document.getElementById('addForm').addEventListener('submit', async e => {
+              e.preventDefault();
+              const name = document.getElementById('name').value;
+              const price = document.getElementById('price').value;
+              await fetch('/api/items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, price }) });
+              refreshTable();
+              e.target.reset();
+            });
+
+            document.getElementById('updateForm').addEventListener('submit', async e => {
+              e.preventDefault();
+              const id = document.getElementById('updateId').value;
+              const name = document.getElementById('updateName').value;
+              const price = document.getElementById('updatePrice').value;
+              await fetch('/api/items/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, price }) });
+              refreshTable();
+              e.target.reset();
+            });
+
+            document.getElementById('deleteForm').addEventListener('submit', async e => {
+              e.preventDefault();
+              const id = document.getElementById('deleteId').value;
+              await fetch('/api/items/' + id, { method: 'DELETE' });
+              refreshTable();
+              e.target.reset();
+            });
+          </script>
         </body>
       </html>
     `;
@@ -92,7 +149,7 @@ app.get("/", async (req, res) => {
   }
 });
 
-// CRUD
+// ================== CRUD APIs ===================
 app.get("/api/items", async (req, res) => {
   try {
     const [rows] = await pool.query("SELECT id, name, price, created_at FROM items ORDER BY id DESC");
@@ -144,11 +201,12 @@ app.delete("/api/items/:id", async (req, res) => {
   }
 });
 
+// ================== START APP ===================
 (async () => {
   try {
     await initDb();
     app.listen(APP_PORT, () => {
-      console.log(`Server listening on port ${APP_PORT}`);
+      console.log(`✅ Server listening on port ${APP_PORT}`);
     });
   } catch (e) {
     console.error("Failed to init app:", e);
